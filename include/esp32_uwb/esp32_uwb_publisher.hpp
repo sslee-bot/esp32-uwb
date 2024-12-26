@@ -9,7 +9,8 @@
 #include <sstream>
 #include <rclcpp/rclcpp.hpp>
 #include "std_msgs/msg/header.hpp"
-#include "std_msgs/msg/int32_multi_array.hpp"
+// #include "std_msgs/msg/int32_multi_array.hpp"
+#include "std_msgs/msg/float32_multi_array.hpp"
 
 using namespace std;
 using namespace std::chrono_literals;
@@ -27,7 +28,7 @@ public:
 private:
     virtual void timer_callback();
 
-    rclcpp::Publisher<std_msgs::msg::Int32MultiArray>::SharedPtr dist_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr dist_pub_;
     rclcpp::Publisher<std_msgs::msg::Header>::SharedPtr header_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
     serial::Serial ser_;

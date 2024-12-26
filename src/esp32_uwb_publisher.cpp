@@ -43,7 +43,7 @@ UwbPublisher::UwbPublisher()
     // timer_rate_ = this->declare_parameter("timer_rate", double(10));
 
     // publisher
-    dist_pub_ = this->create_publisher<std_msgs::msg::Int32MultiArray>("uwb_dist", 1000);
+    dist_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("uwb_dist", 1000);
     header_pub_ = this->create_publisher<std_msgs::msg::Header>("header_uwb", 1000);
 
     // timer
@@ -102,13 +102,14 @@ void UwbPublisher::start()
 void UwbPublisher::timer_callback()
 {
     if (ser_.available()) {
-        // TODO
+        string data = ser_.read(ser_.available());
+        
+        // For debug
+        RCLCPP_WARN_STREAM(this->get_logger(), data);
+        // RCLCPP_WARN_STREAM_THROTTLE(
+        //     this->get_logger(), *(this->get_clock()), 2000,
+        //     "debug, " << data);
     }
-
-    // For debug
-    RCLCPP_WARN_STREAM_THROTTLE(
-              this->get_logger(), *(this->get_clock()), 2000,
-              "debug");
 }
 
 int main(int argc, char **argv)
