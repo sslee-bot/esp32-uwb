@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <regex>
 #include <rclcpp/rclcpp.hpp>
 #include "std_msgs/msg/header.hpp"
 // #include "std_msgs/msg/int32_multi_array.hpp"
@@ -28,17 +29,22 @@ public:
 private:
     virtual void timer_callback();
 
-    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr dist_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr range_pub_;
     rclcpp::Publisher<std_msgs::msg::Header>::SharedPtr header_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
     serial::Serial ser_;
     string port_;
     int baud_rate_;
     double timer_rate_; // Timer callback rate
-    vector<string> anchor_id_;
+    double pub_rate_;
+    vector<int64_t> anchor_id_;
+
     int anchor_num_;
-    vector<int> dist_;
+    vector<float> range_;
     bool init_okay_;
+
+    rclcpp::Time last_pub_time_;
+    bool is_pub_once_;
 };
 
 #endif

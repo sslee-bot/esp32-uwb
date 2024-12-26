@@ -2,5 +2,6 @@ esp32_uwb_publisher:
   ros__parameters:
     port: '/dev/ttyUSB0'
     baud_rate: 115200
-    timer_rate: 10.0
-    anchor_id: [TODO]
+    timer_rate: 100.0
+    pub_rate: 10.0
+    anchor_id: [1781, 1786]
