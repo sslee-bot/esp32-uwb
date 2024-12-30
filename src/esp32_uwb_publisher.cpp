@@ -101,15 +101,16 @@ void UwbPublisher::start() {
 }
 
 void UwbPublisher::timer_callback() {
-    if (!ser_.available()) {
-        // RCLCPP_WARN_STREAM_THROTTLE(this->get_logger(), *(this->get_clock()),
-        //                             2000, "serial not available");
-        return;
-    }
-
     // save time if no topic published yet
     if (is_pub_once_ == false) {
         last_pub_time_ = this->now();
+    }
+
+    if (!ser_.available()) {
+        // RCLCPP_WARN_STREAM_THROTTLE(this->get_logger(), *(this->get_clock()),
+        //                             2000, "serial not available");
+        this->check_and_pub();
+        return;
     }
 
     // get string
@@ -152,7 +153,6 @@ void UwbPublisher::timer_callback() {
         range_[index] = range;
     } else {
         // it is currently unused anchor, ignore it
-        return;
     }
 
     // publish updated topic
@@ -164,7 +164,8 @@ void UwbPublisher::check_and_pub() {
     auto now = this->now();
     auto duration = now - last_pub_time_;
     // RCLCPP_WARN_STREAM(this->get_logger(), duration.seconds());
-    if (!is_pub_once_ || duration.seconds() > 1.0 / pub_rate_) {
+    if (!is_pub_once_ ||
+        duration.seconds() > 1.0 / pub_rate_ - 0.1 / timer_rate_) {
         // publish
         std_msgs::msg::Float32MultiArray msg_range;
         msg_range.data = range_;
