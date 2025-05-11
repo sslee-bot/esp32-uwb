@@ -6,6 +6,8 @@ UwbPublisher::UwbPublisher()
       header_pub_(),
       timer_(),
       ser_(),
+      integer_regex_("from: (\\d+)"),
+      range_regex_("Range: ([\\d\\.]+) m"),
       init_okay_(false),
       is_pub_once_(false) {
     // Log
@@ -114,29 +116,28 @@ void UwbPublisher::timer_callback() {
     }
 
     // get string
-    string data = ser_.read(ser_.available());
+    string data = ser_.readline(ser_.available());
 
     // get anchor id and range
-    regex integer_regex("from: (\\d+)");
-    regex range_regex("Range: ([\\d\\.]+) m");
-    smatch match;
     int id;
     double range;
 
-    if (regex_search(data, match, integer_regex)) {
-        id = stoi(match[1]);
-        if (regex_search(data, match, range_regex)) {
-            range = stod(match[1]);
+    if (regex_search(data, match_, integer_regex_)) {
+        id = stoi(match_[1]);
+        if (regex_search(data, match_, range_regex_)) {
+            range = stod(match_[1]);
         } else {
-            RCLCPP_WARN_STREAM(this->get_logger(),
-                               "no range value is included: " << data);
+            RCLCPP_WARN_STREAM_THROTTLE(this->get_logger(),
+                                        *(this->get_clock()), 2000,
+                                        "no range value is included: " << data);
             // no need to change output data
             this->check_and_pub();
             return;
         }
     } else {
-        RCLCPP_WARN_STREAM(this->get_logger(),
-                           "no anchor ID value is included: " << data);
+        RCLCPP_WARN_STREAM_THROTTLE(this->get_logger(), *(this->get_clock()),
+                                    2000,
+                                    "no anchor ID value is included: " << data);
         // no need to change output data
         this->check_and_pub();
         return;

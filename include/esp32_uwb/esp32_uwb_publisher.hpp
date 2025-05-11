@@ -33,6 +33,10 @@ private:
     rclcpp::Publisher<std_msgs::msg::Header>::SharedPtr header_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
     serial::Serial ser_;
+
+    regex integer_regex_, range_regex_;
+    smatch match_;
+
     string port_;
     int baud_rate_;
     double timer_rate_;  // Timer callback rate
