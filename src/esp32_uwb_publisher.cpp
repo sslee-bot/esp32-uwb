@@ -1,4 +1,7 @@
 #include "esp32_uwb/esp32_uwb_publisher.hpp"
+#include <thread>
+#include <mutex>
+#include <atomic>
 
 UwbPublisher::UwbPublisher()
     : Node("esp32_uwb_publisher"),
@@ -9,59 +12,39 @@ UwbPublisher::UwbPublisher()
       integer_regex_("from: (\\d+)"),
       range_regex_("Range: ([\\d\\.]+) m"),
       init_okay_(false),
-      is_pub_once_(false) {
-    // Log
+      is_pub_once_(false),
+      stop_serial_thread_(false) {
     RCLCPP_INFO_STREAM(this->get_logger(), "Start to initialize");
 
-    // parameters
     this->declare_parameter("port", rclcpp::ParameterType::PARAMETER_STRING);
-    this->declare_parameter("baud_rate",
-                            rclcpp::ParameterType::PARAMETER_INTEGER);
-    this->declare_parameter("timer_rate",
-                            rclcpp::ParameterType::PARAMETER_DOUBLE);
-    this->declare_parameter("pub_rate",
-                            rclcpp::ParameterType::PARAMETER_DOUBLE);
-    this->declare_parameter("anchor_id",
-                            rclcpp::ParameterType::PARAMETER_INTEGER_ARRAY);
+    this->declare_parameter("baud_rate", rclcpp::ParameterType::PARAMETER_INTEGER);
+    this->declare_parameter("rate", rclcpp::ParameterType::PARAMETER_DOUBLE);
+    this->declare_parameter("anchor_id", rclcpp::ParameterType::PARAMETER_INTEGER_ARRAY);
 
-    if (!this->get_parameter("port", port_)) {
-        RCLCPP_ERROR_STREAM(this->get_logger(), "no parameter: port");
-        return;
-    }
-    if (!this->get_parameter("baud_rate", baud_rate_)) {
-        RCLCPP_ERROR_STREAM(this->get_logger(), "no parameter: baud_rate");
-        return;
-    }
-    if (!this->get_parameter("timer_rate", timer_rate_)) {
-        RCLCPP_ERROR_STREAM(this->get_logger(), "no parameter: timer_rate");
-        return;
-    }
-    if (!this->get_parameter("pub_rate", pub_rate_)) {
-        RCLCPP_ERROR_STREAM(this->get_logger(), "no parameter: pub_rate");
-        return;
-    }
-    if (!this->get_parameter("anchor_id", anchor_id_)) {
-        RCLCPP_ERROR_STREAM(this->get_logger(), "no parameter: anchor_id");
+    std::vector<int64_t> anchor_id_long;
+    if (!this->get_parameter("port", port_) ||
+        !this->get_parameter("baud_rate", baud_rate_) ||
+        !this->get_parameter("rate", timer_rate_) ||
+        !this->get_parameter("anchor_id", anchor_id_long)) {
+        RCLCPP_ERROR_STREAM(this->get_logger(), "Parameter missing");
         return;
     }
 
+    anchor_id_.clear();
+    anchor_id_.reserve(anchor_id_long.size());
+    for (int64_t id : anchor_id_long) {
+        anchor_id_.push_back(static_cast<int>(id));
+    }
     anchor_num_ = anchor_id_.size();
     RCLCPP_INFO_STREAM(this->get_logger(), "num of anchors: " << anchor_num_);
-    range_ = vector<float>(anchor_num_, 0.0);
+    range_ = std::vector<float>(anchor_num_, 0.0);
 
-    // port_ = this->declare_parameter("port", string("/dev/ttyACM0"));
-    // baud_rate_ = this->declare_parameter("baud_rate", int(115200));
-    // timer_rate_ = this->declare_parameter("timer_rate", double(10));
+    range_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("uwb_range", 10);
+    header_pub_ = this->create_publisher<std_msgs::msg::Header>("uwb_header", 10);
 
-    // publisher
-    range_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>(
-        "uwb_range", 1000);
-    header_pub_ =
-        this->create_publisher<std_msgs::msg::Header>("uwb_header", 1000);
-
-    // timer
     timer_ = this->create_wall_timer(
-        1s / timer_rate_, std::bind(&UwbPublisher::timer_callback, this));
+        std::chrono::duration<double>(1.0 / timer_rate_),
+        std::bind(&UwbPublisher::timer_callback, this));
     timer_->cancel();
 
     RCLCPP_INFO_STREAM(this->get_logger(), "Complete initialization");
@@ -69,6 +52,10 @@ UwbPublisher::UwbPublisher()
 }
 
 UwbPublisher::~UwbPublisher() {
+    stop_serial_thread_ = true;
+    if (serial_thread_.joinable()) {
+        serial_thread_.join();
+    }
     ser_.close();
     timer_->cancel();
 }
@@ -99,100 +86,59 @@ bool UwbPublisher::init_serial() {
 }
 
 void UwbPublisher::start() {
+    stop_serial_thread_ = false;
+    serial_thread_ = std::thread(&UwbPublisher::serial_read_loop, this);
     timer_->reset();
 }
 
-void UwbPublisher::timer_callback() {
-    // save time if no topic published yet
-    if (is_pub_once_ == false) {
-        last_pub_time_ = this->now();
-    }
-
-    if (!ser_.available()) {
-        // RCLCPP_WARN_STREAM_THROTTLE(this->get_logger(), *(this->get_clock()),
-        //                             2000, "serial not available");
-        this->check_and_pub();
-        return;
-    }
-
-    // get string
-    string data = ser_.readline(ser_.available());
-
-    // get anchor id and range
-    int id;
-    double range;
-
-    if (regex_search(data, match_, integer_regex_)) {
-        id = stoi(match_[1]);
-        if (regex_search(data, match_, range_regex_)) {
-            range = stod(match_[1]);
-        } else {
-            RCLCPP_WARN_STREAM_THROTTLE(this->get_logger(),
-                                        *(this->get_clock()), 2000,
-                                        "no range value is included: " << data);
-            // no need to change output data
-            this->check_and_pub();
-            return;
+void UwbPublisher::serial_read_loop() {
+    while (!stop_serial_thread_ && rclcpp::ok()) {
+        if (!ser_.available()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
         }
-    } else {
-        RCLCPP_WARN_STREAM_THROTTLE(this->get_logger(), *(this->get_clock()),
-                                    2000,
-                                    "no anchor ID value is included: " << data);
-        // no need to change output data
-        this->check_and_pub();
-        return;
+
+        std::string data = ser_.readline(ser_.available());
+        int id;
+        double range;
+
+        if (std::regex_search(data, match_, integer_regex_)) {
+            id = std::stoi(match_[1]);
+            if (std::regex_search(data, match_, range_regex_)) {
+                range = std::stod(match_[1]);
+                auto it = std::find(anchor_id_.begin(), anchor_id_.end(), id);
+                if (it != anchor_id_.end()) {
+                    int index = std::distance(anchor_id_.begin(), it);
+                    std::lock_guard<std::mutex> lock(range_mutex_);
+                    range_[index] = range;
+                }
+            }
+        }
     }
+}
 
-    // for debug
-    // RCLCPP_WARN_STREAM(this->get_logger(), "id: " << id << ", range: " << range);
-
-    // update range vector
-    auto it = find(anchor_id_.begin(), anchor_id_.end(), id);
-    int index = 0;
-    if (it != anchor_id_.end()) {
-        index = distance(anchor_id_.begin(), it);
-        range_[index] = range;
-    } else {
-        // it is currently unused anchor, ignore it
-    }
-
-    // publish updated topic
-    this->check_and_pub();
+void UwbPublisher::timer_callback() {
+    check_and_pub();
 }
 
 void UwbPublisher::check_and_pub() {
-    // check duration
-    auto now = this->now();
-    auto duration = now - last_pub_time_;
-    // RCLCPP_WARN_STREAM(this->get_logger(), duration.seconds());
-    if (!is_pub_once_ ||
-        duration.seconds() > 1.0 / pub_rate_ - 0.1 / timer_rate_) {
-        // publish
-        std_msgs::msg::Float32MultiArray msg_range;
+    std_msgs::msg::Float32MultiArray msg_range;
+    {
+        std::lock_guard<std::mutex> lock(range_mutex_);
         msg_range.data = range_;
-        range_pub_->publish(msg_range);
-
-        std_msgs::msg::Header msg_header;
-        msg_header.stamp = now;
-        header_pub_->publish(msg_header);
-
-        is_pub_once_ = true;
-        last_pub_time_ = now;
     }
+
+    range_pub_->publish(msg_range);
+
+    std_msgs::msg::Header msg_header;
+    msg_header.stamp = this->now();
+    header_pub_->publish(msg_header);
 }
 
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
-
     auto node = std::make_shared<UwbPublisher>();
-    bool init_okay = node->init_okay();
-    // return -1 if init fail
-    if (init_okay == false) {
-        return -1;
-    }
-
-    bool ret = node->init_serial();
-    if (ret == false) {
+    if (!node->init_okay() || !node->init_serial()) {
         return -1;
     }
     node->start();
@@ -200,3 +146,4 @@ int main(int argc, char** argv) {
     rclcpp::shutdown();
     return 0;
 }
+

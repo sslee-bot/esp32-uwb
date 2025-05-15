@@ -1,54 +1,61 @@
-#ifndef SSLEE_BOT_ESP32_UWB
-#define SSLEE_BOT_ESP32_UWB
+#ifndef ESP32_UWB_PUBLISHER_HPP
+#define ESP32_UWB_PUBLISHER_HPP
 
-#include <serial/serial.h>
-#include <chrono>
-#include <memory>
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/float32_multi_array.hpp>
+#include <std_msgs/msg/header.hpp>
+#include <serial/serial.h>
 #include <regex>
-#include <sstream>
-#include <string>
 #include <vector>
-#include "std_msgs/msg/header.hpp"
-// #include "std_msgs/msg/int32_multi_array.hpp"
-#include "std_msgs/msg/float32_multi_array.hpp"
-
-using namespace std;
-using namespace std::chrono_literals;
-using std::placeholders::_1;
+#include <string>
+#include <thread>
+#include <mutex>
+#include <atomic>
 
 class UwbPublisher : public rclcpp::Node {
 public:
     UwbPublisher();
-    virtual ~UwbPublisher();
-    virtual bool init_serial();
-    virtual bool init_okay();
-    virtual void start();
+    ~UwbPublisher();
+
+    bool init_okay();
+    bool init_serial();
+    void start();
 
 private:
-    virtual void timer_callback();
-    virtual void check_and_pub();
+    void timer_callback();
+    void check_and_pub();
+    void serial_read_loop();
 
+    // ROS interfaces
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr range_pub_;
     rclcpp::Publisher<std_msgs::msg::Header>::SharedPtr header_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
+
+    // serial interface
     serial::Serial ser_;
 
-    regex integer_regex_, range_regex_;
-    smatch match_;
-
-    string port_;
+    // parameters
+    std::string port_;
     int baud_rate_;
-    double timer_rate_;  // Timer callback rate
-    double pub_rate_;
-    vector<int64_t> anchor_id_;
-
+    double timer_rate_;
+    std::vector<int> anchor_id_;
     int anchor_num_;
-    vector<float> range_;
-    bool init_okay_;
 
-    rclcpp::Time last_pub_time_;
+    // data
+    std::vector<float> range_;
+    std::regex integer_regex_;
+    std::regex range_regex_;
+    std::smatch match_;
+
+    // status
+    bool init_okay_;
     bool is_pub_once_;
+
+    // thread
+    std::thread serial_thread_;
+    std::atomic<bool> stop_serial_thread_;
+    std::mutex range_mutex_;
 };
 
-#endif
+#endif  // ESP32_UWB_PUBLISHER_HPP
+
